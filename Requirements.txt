@@ -1,0 +1,5 @@
+numpy
+cv2
+openni
+threading
+pyzbar
