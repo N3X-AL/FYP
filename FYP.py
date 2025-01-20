@@ -86,6 +86,19 @@ def detect_qr_code(frame):
 
     return frame
 
+# Function to generate a color based on weight
+def get_color_for_weight(weight):
+    if weight < 0.2:
+        return (0, 255, 0)  # Green for low weight
+    elif weight < 0.4:
+        return (255, 255, 0)  # Yellow for medium-low weight
+    elif weight < 0.6:
+        return (255, 165, 0)  # Orange for medium weight
+    elif weight < 0.8:
+        return (255, 69, 0)  # Red-Orange for medium-high weight
+    else:
+        return (255, 0, 0)  # Red for high weight
+
 # Function to process depth map and detect obstacles
 def process_depth_map():
     global depth_map, obstacle_clusters, cost_map, output
@@ -102,11 +115,6 @@ def process_depth_map():
 
         # Obstacle Detection
         binary_roi = (roi > 0).astype('uint8')
-
-        # Apply morphological operations to separate closely placed obstacles
-        kernel = np.ones((3, 3), np.uint8)
-        binary_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_CLOSE, kernel, iterations=2)
-        binary_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, kernel, iterations=2)
 
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_roi, connectivity=8)
 
@@ -135,10 +143,13 @@ def process_depth_map():
                 mean_depth = np.mean(roi[labels == labels[cy, cx]])
                 cv2.putText(output, f"{mean_depth:.2f}m", (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        # Generate Cost Map
-        cost_map = np.zeros_like(roi, dtype='uint8')
+        # Generate 3D Weighted Cost Map
+        cost_map = np.zeros((roi.shape[0], roi.shape[1], 3), dtype='uint8')
         for cluster in obstacle_clusters:
-            cost_map[labels == cluster['label']] = 1
+            distance = cluster['mean_depth']
+            weight = 1 / (distance + 1e-6)  # Avoid division by zero
+            color = get_color_for_weight(weight)
+            cost_map[labels == cluster['label']] = color
 
 # Function to process color image
 def process_color_image():
@@ -195,7 +206,7 @@ try:
             colorized_depth = cv2.resize(colorized_depth, (640, 480), interpolation=cv2.INTER_LINEAR)
             output = cv2.resize(output, (640, 480), interpolation=cv2.INTER_LINEAR)
             color_image_with_contours = cv2.resize(color_image_with_contours, (640, 480), interpolation=cv2.INTER_LINEAR)
-            cost_map_resized = cv2.resize(cost_map * 255, (640, 480), interpolation=cv2.INTER_NEAREST)
+            cost_map_resized = cv2.resize(cost_map, (640, 480), interpolation=cv2.INTER_NEAREST)
 
             # Show results
             cv2.imshow("Obstacle Detection", output)
