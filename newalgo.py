@@ -26,13 +26,15 @@ color_stream.start()
 
 # Parameters for obstacle detection
 min_distance = 0.2  # Minimum depth in meters
-max_distance = 2.0  # Maximum depth in meters
-region_of_interest = (10, 230, 10, 310)  # ROI: y_min, y_max, x_min, x_max (adjusted for lower resolution)
+max_distance = 6.0  # Maximum depth in meters
+region_of_interest = (0, 240, 0, 320)  # ROI: y_min, y_max, x_min, x_max (adjusted for lower resolution)
 
 # Shared variables
 depth_map = None
 color_image = None
 output = None
+contours = None
+color_image_upscaled = None
 
 # Function to retrieve the depth map
 def get_depth_map():
@@ -52,7 +54,7 @@ def get_color_image():
 
 # Function to process depth map and detect obstacles using edge detection and depth information
 def process_depth_map():
-    global depth_map, output
+    global depth_map, output, contours
     while True:
         depth_map = get_depth_map()
 
@@ -71,7 +73,8 @@ def process_depth_map():
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         # Visualize Obstacles with Depth Information
-        output = cv2.cvtColor((roi / max_distance * 255).astype('uint8'), cv2.COLOR_GRAY2BGR)
+        depth_colormap = cv2.applyColorMap(255-(roi / max_distance * 255).astype('uint8'), cv2.COLORMAP_JET)
+        output = depth_colormap.copy()
         for contour in contours:
             cv2.drawContours(output, [contour], -1, (0, 255, 0), 2)
             M = cv2.moments(contour)
@@ -81,19 +84,25 @@ def process_depth_map():
                 mean_depth = np.mean(roi[cy, cx])
                 cv2.putText(output, f"{mean_depth:.2f}m", (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-                # Draw bounding box with depth information
-                x, y, w, h = cv2.boundingRect(contour)
-                cv2.rectangle(output, (x, y), (x + w, y + h), (255, 0, 0), 2)
-                cv2.putText(output, f"Depth: {mean_depth:.2f}m", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                # Removed bounding box drawing
+                # cv2.rectangle(output, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                # cv2.putText(output, f"Depth: {mean_depth:.2f}m", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
 
 # Function to process color image
 def process_color_image():
-    global color_image
+    global color_image, contours, color_image_upscaled
     while True:
         color_image = get_color_image()
 
         # Upscale the color image for display
         color_image_upscaled = cv2.resize(color_image, (640, 480), interpolation=cv2.INTER_LINEAR)
+
+        if contours is not None:
+            scale_x = 640 / 320
+            scale_y = 480 / 240
+            for contour in contours:
+                contour = np.array(contour, dtype=np.float32) * [scale_x, scale_y]
+                cv2.drawContours(color_image_upscaled, [contour.astype(np.int32)], -1, (0, 255, 0), 2)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
@@ -116,7 +125,7 @@ try:
 
             # Show results
             cv2.imshow("Obstacle Detection", output_resized)
-            cv2.imshow("RGB Stream", color_image)
+            cv2.imshow("RGB Stream", color_image_upscaled)  # Show upscaled color image at the end
 
         # Exit on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
