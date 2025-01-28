@@ -4,3 +4,5 @@ Scripts
 Include
 .vscode
 pyvenv.cfg
+FYP.py
+clustering+qrcode.py
