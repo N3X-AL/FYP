@@ -111,88 +111,78 @@ try:
 
                     print(f"{class_name} detected at ({center_x}, {center_y}), Distance: {object_distance:.2f} meters")
 
+        # Function to calculate QR code center based on bounding box
+        def calculate_qr_center_from_bbox(qr_bbox):
+            """
+            Calculate the center of the QR code based on bounding box.
+            :param qr_bbox: Bounding box of the QR code
+            :return: (center_x, center_y) coordinates of the QR code center
+            """
+            if qr_bbox is not None and len(qr_bbox) == 4:
+                center_x = int((qr_bbox[0][0][0] + qr_bbox[1][0][0] + qr_bbox[2][0][0] + qr_bbox[3][0][0]) / 4)
+                center_y = int((qr_bbox[0][0][1] + qr_bbox[1][0][1] + qr_bbox[2][0][1] + qr_bbox[3][0][1]) / 4)
+                return center_x, center_y
+            return None, None
+
+        # Function to calculate QR code center using contours
+        def calculate_qr_center_using_contours(frame_bgr):
+            """
+            Calculate the center of the QR code using contours.
+            :param frame_bgr: The frame containing the QR code
+            :return: (center_x, center_y) coordinates of the QR code center
+            """
+            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edged = cv2.Canny(blurred, 50, 150)
+
+            contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                approx = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
+                if len(approx) == 4:
+                    M = cv2.moments(approx)
+                    if M["m00"] != 0:
+                        center_x = int(M["m10"] / M["m00"])
+                        center_y = int(M["m01"] / M["m00"])
+                        return center_x, center_y
+            return None, None
+
         # Detect and decode QR code
-        retval, qr_bbox, _ = qr_detector.detectAndDecode(frame_bgr)
-
-        if not retval:
-            print("QR code detection failed: No QR code detected.")
-            stop_motors()
-        elif qr_bbox is None or len(qr_bbox) < 4:
-            print("QR code detection failed: Bounding box is None or incomplete.")
-            stop_motors()
-        else:
-            print(f"QR code detected with bounding box: {qr_bbox}")
-
-            # Calculate QR code position
+        qr_data, qr_bbox, _ = qr_detector.detectAndDecode(frame_bgr)
+        if qr_bbox is not None and qr_data:
+            # Draw bounding box for QR code
             qr_bbox = qr_bbox.astype(int)
-            center_x = int((qr_bbox[0][0][0] + qr_bbox[2][0][0]) / 2)
-            center_y = int((qr_bbox[0][0][1] + qr_bbox[2][0][1]) / 2)
+            for i in range(len(qr_bbox)):
+                start_point = tuple(qr_bbox[i][0])
+                end_point = tuple(qr_bbox[(i + 1) % len(qr_bbox)][0])
+                cv2.line(frame_bgr, start_point, end_point, (0, 255, 255), 2)
+
+            # Display the QR code data on the frame
+            cv2.putText(frame_bgr, f"QR: {qr_data}", (qr_bbox[0][0][0], qr_bbox[0][0][1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            print(f"QR Code Detected: {qr_data}")
+
+            # Calculate QR code position using contours
+            center_x, center_y = calculate_qr_center_using_contours(frame_bgr)
             frame_center_x = frame_bgr.shape[1] // 2
 
-            # Adjust motor commands based on QR code position
-            if center_x < frame_center_x - tolerance:  # QR code is to the left
-                print("QR code detected: Adjusting left...")
-                turn_left()
-            elif center_x > frame_center_x + tolerance:  # QR code is to the right
-                print("QR code detected: Adjusting right...")
-                turn_right()
-            else:  # QR code is centered
-                print("QR code is centered. Moving forward.")
-                move_forward()
-
-        '''retval,qr_data, qr_bbox, _ = qr_detector.detectAndDecodeMulti(frame_bgr)
-
-        if qr_data:
-            if qr_data == target_qr_code:
-                qr_lost = False
-                print("Following the target QR code...")
-
-                if qr_bbox is not None:
-                    # Calculate QR code position
-                    qr_bbox = qr_bbox.astype(int)
-                    center_x = int((qr_bbox[0][0][0] + qr_bbox[2][0][0]) / 2)
-                    center_y = int((qr_bbox[0][0][1] + qr_bbox[2][0][1]) / 2)
-                    frame_center_x = frame_bgr.shape[1] // 2
-                    print('centre x:', center_x,'centre y:',center_y)
-                    # Adjust motor commands based on QR code position
-                    tolerance = 10  # Define tolerance for QR code centering
-                    if center_x < frame_center_x - tolerance:  # QR code is to the left
-                        print("QR code detected: Adjusting left...")
-                        turn_left()
-                    elif center_x > frame_center_x + tolerance:  # QR code is to the right
-                        print("QR code detected: Adjusting right...")
-                        turn_right()
-                    else:  # QR code is centered
-                        print("QR code is centered. Moving forward.")
-                        move_forward()
-
-                    # Draw the bounding box and mark the QR code center
-                    for i in range(len(qr_bbox)):
-                        cv2.line(frame_bgr, tuple(qr_bbox[i][0]), tuple(qr_bbox[(i + 1) % len(qr_bbox)][0]), (0, 255, 0), 2)
-                    cv2.circle(frame_bgr, (center_x, center_y), 5, (0, 0, 255), -1)
-
-                    # Calculate distance to the QR code
-                    qr_distance = depth_data[center_y, center_x] / 1000.0  # Convert to meters
-                    print(f"Distance to QR code: {qr_distance:.2f} meters")
-
-                    # Stop if the QR code is too close
-                    if qr_distance < 0.5:
-                        print("QR code is too close! Stopping the trolley.")
-                        stop_motors()
-
-                last_time_seen = time.time()
-
+            if center_x is not None and center_y is not None:
+                # Adjust motor commands based on QR code position
+                if center_x < frame_center_x - tolerance:  # QR code is to the left
+                    print("QR code detected: Adjusting left...")
+                    turn_left()
+                elif center_x > frame_center_x + tolerance:  # QR code is to the right
+                    print("QR code detected: Adjusting right...")
+                    turn_right()
+                else:  # QR code is centered
+                    print("QR code is centered. Moving forward.")
+                    move_forward()
             else:
-                print("New QR code detected, not following it.")
+                print("QR code center calculation failed.")
+                stop_motors()
         else:
-            if not qr_lost:
-                qr_lost = True
-                print("Lost sight of the QR code! Searching...")
-                turn_left()
-                cv2.waitKey(500)  # Adjust timing as needed
+            print("QR code detection failed: No QR code detected or bounding box is incomplete.")
+            stop_motors()
 
-        # Display the frames
-        cv2.imshow("QR Code Tracking", frame_bgr)'''
         cv2.imshow("YOLOv8 - Object Detection with Distance", frame_bgr)
         depth_image = cv2.applyColorMap(cv2.convertScaleAbs(depth_data, alpha=0.05), cv2.COLORMAP_JET)
         depth_image = cv2.resize(depth_image, (640, 480))  # Upscale depth image
