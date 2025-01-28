@@ -14,6 +14,11 @@ device = openni2.Device.open_any()
 # Create depth and color streams
 depth_stream = device.create_depth_stream()
 color_stream = device.create_color_stream()
+
+# Set the resolution to 320x240
+depth_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_DEPTH_1_MM, 320, 240, 30))
+color_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_RGB888, 320, 240, 30))
+
 depth_stream.start()
 color_stream.start()
 
@@ -50,6 +55,9 @@ while target_qr_code is None:
     color_data = color_data.reshape((color_stream.get_video_mode().resolutionY, color_stream.get_video_mode().resolutionX, 3))
     frame_bgr = cv2.cvtColor(color_data, cv2.COLOR_RGB2BGR)
 
+    # Upscale the frame to the original resolution
+    frame_bgr = cv2.resize(frame_bgr, (640, 480))
+
     # Detect and decode QR code
     qr_data, _, _ = qr_detector.detectAndDecode(frame_bgr)
     if qr_data:
@@ -77,6 +85,9 @@ try:
         color_data = color_data.reshape((color_stream.get_video_mode().resolutionY, color_stream.get_video_mode().resolutionX, 3))
         frame_bgr = cv2.cvtColor(color_data, cv2.COLOR_RGB2BGR)
 
+        # Upscale the frame to the original resolution
+        frame_bgr = cv2.resize(frame_bgr, (640, 480))
+
         # Run YOLOv8 inference
         results = model.predict(frame_bgr, imgsz=640, conf=0.5)
         if results and results[0].boxes:  # Check if there are detections
@@ -101,13 +112,13 @@ try:
                     print(f"{class_name} detected at ({center_x}, {center_y}), Distance: {object_distance:.2f} meters")
 
         # Detect and decode QR code
-        retval, qr_bbox,_= qr_detector.detectAndDecode(frame_bgr)
+        retval, qr_bbox, _ = qr_detector.detectAndDecode(frame_bgr)
 
         if not retval:
             print("QR code detection failed: No QR code detected.")
             stop_motors()
-        elif qr_bbox is None:
-            print("QR code detection failed: Bounding box is None.")
+        elif qr_bbox is None or len(qr_bbox) < 4:
+            print("QR code detection failed: Bounding box is None or incomplete.")
             stop_motors()
         else:
             print(f"QR code detected with bounding box: {qr_bbox}")
@@ -184,6 +195,7 @@ try:
         cv2.imshow("QR Code Tracking", frame_bgr)'''
         cv2.imshow("YOLOv8 - Object Detection with Distance", frame_bgr)
         depth_image = cv2.applyColorMap(cv2.convertScaleAbs(depth_data, alpha=0.05), cv2.COLORMAP_JET)
+        depth_image = cv2.resize(depth_image, (640, 480))  # Upscale depth image
         cv2.imshow("Depth Image", depth_image)
 
         # Exit on 'q'
