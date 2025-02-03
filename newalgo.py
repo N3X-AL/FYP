@@ -92,10 +92,6 @@ def process_color_image():
     global color_image
     while True:
         color_image = get_color_image()
-
-        # Upscale the color image for display
-        color_image_upscaled = cv2.resize(color_image, (640, 480), interpolation=cv2.INTER_LINEAR)
-
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -112,12 +108,14 @@ color_thread.start()
 try:
     while True:  # Run indefinitely until 'q' is pressed
         if depth_map is not None and color_image is not None:
-            # Display Results
+            # Display Results upscaled
+
+            color_image_upscaled = cv2.resize(color_image, (640, 480), interpolation=cv2.INTER_LINEAR)
             output_resized = cv2.resize(output, (640, 480), interpolation=cv2.INTER_LINEAR)
 
             # Show results
             cv2.imshow("Obstacle Detection", output_resized)
-            cv2.imshow("RGB Stream", color_image)
+            cv2.imshow("RGB Stream", color_image_upscaled)
 
         # Exit on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
