@@ -16,8 +16,12 @@ depth_stream = device.create_depth_stream()
 color_stream = device.create_color_stream()
 
 # Set the resolution to 320x240
-depth_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_DEPTH_1_MM, 320, 240, 30))
-color_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_RGB888, 320, 240, 30))
+color_stream_width = 1280
+color_stream_height = 960
+depth_stream_width = 320
+depth_stream_height = 240
+depth_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_DEPTH_1_MM, depth_stream_width, depth_stream_height, 30))
+color_stream.set_video_mode(openni2.VideoMode(openni2.PIXEL_FORMAT_RGB888, color_stream_width, color_stream_height, 30))
 
 depth_stream.start()
 color_stream.start()
@@ -62,29 +66,47 @@ while target_qr_code is None:
         print(f"Target QR code registered: {target_qr_code}")
         break
 
-    # Upscale the frame to the original resolution for display
-    display_frame = cv2.resize(frame_bgr, (640, 480))
-
     # Display the camera feed
-    cv2.imshow("Register QR Code", display_frame)
+    cv2.imshow("Register QR Code", frame_bgr)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         print("QR code registration aborted.")
         break
 
 tolerance = 50
+
+# Function to interpolate depth data to match the color stream resolution
+def interpolate_depth_to_color(depth_data, depth_res, color_res):
+    """
+    Interpolates depth data to match the color stream resolution.
+    :param depth_data: The depth data array
+    :param depth_res: The resolution of the depth stream (width, height)
+    :param color_res: The resolution of the color stream (width, height)
+    :return: Interpolated depth data array
+    """
+    depth_height, depth_width = depth_res
+    color_height, color_width = color_res
+    scale_x = color_width / depth_width
+    scale_y = color_height / depth_height
+
+    interpolated_depth = cv2.resize(depth_data, (color_width, color_height), interpolation=cv2.INTER_NEAREST)
+    return interpolated_depth
+
 try:
     qr_lost = False  # Flag to handle QR code loss
     while True:
-        # Depth Stream
+        # Depth Stream (320x240)
         depth_frame = depth_stream.read_frame()
         depth_data = np.frombuffer(depth_frame.get_buffer_as_uint16(), dtype=np.uint16)
         depth_data = depth_data.reshape((depth_stream.get_video_mode().resolutionY, depth_stream.get_video_mode().resolutionX))
 
-        # Color Stream
+        # Color Stream (1280x720)
         color_frame = color_stream.read_frame()
         color_data = np.frombuffer(color_frame.get_buffer_as_uint8(), dtype=np.uint8)
         color_data = color_data.reshape((color_stream.get_video_mode().resolutionY, color_stream.get_video_mode().resolutionX, 3))
         frame_bgr = cv2.cvtColor(color_data, cv2.COLOR_RGB2BGR)
+
+        # Interpolate depth data to match color stream resolution
+        interpolated_depth_data = interpolate_depth_to_color(depth_data, (depth_stream_height, depth_stream_width), (color_stream_height, color_stream_width))
 
         # Define frame_center_x
         frame_center_x = frame_bgr.shape[1] // 2
@@ -100,8 +122,8 @@ try:
 
                 # Calculate depth at the center of the bounding box
                 center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
-                if 0 <= center_x < 320 and 0 <= center_y < 240:
-                    object_distance = depth_data[center_y, center_x] / 1000.0  # Convert to meters
+                if 0 <= center_x < color_stream_width and 0 <= center_y < color_stream_height:
+                    object_distance = interpolated_depth_data[center_y, center_x] / 1000.0  # Convert to meters
 
                     # Create a label with the class name and distance
                     label = f"{class_name}: {confidence:.2f}, {object_distance:.2f}m"
@@ -182,8 +204,8 @@ try:
                     move_forward()
 
                 # Check if QR code is within 1.5 meters
-                if 0 <= center_x < 320 and 0 <= center_y < 240:
-                    object_distance = depth_data[center_y, center_x] / 1000.0  # Convert to meters
+                if 0 <= center_x < color_stream_width and 0 <= center_y < color_stream_height:
+                    object_distance = interpolated_depth_data[center_y, center_x] / 1000.0  # Convert to meters
                     if object_distance <= .5:
                         print("QR code is within .5 meters. Stopping motors.")
                         stop_motors()
@@ -202,8 +224,8 @@ try:
                     x1, y1, x2, y2, confidence, cls = map(int, box[:6])
                     class_name = CLASS_NAMES.get(cls, "Unknown")
                     center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
-                    if 0 <= center_x < 320 and 0 <= center_y < 240:
-                        object_distance = depth_data[center_y, center_x] / 1000.0
+                    if 0 <= center_x < color_stream_width and 0 <= center_y < color_stream_height:
+                        object_distance = interpolated_depth_data[center_y, center_x] / 1000.0
                         if object_distance < .5:
                             print(f"Obstacle detected: {class_name} at {object_distance:.2f} meters. Avoiding...")
                             if center_x < frame_center_x:
@@ -215,11 +237,10 @@ try:
                     else:
                         print(f"Center coordinates out of bounds: ({center_x}, {center_y})")
 
-        # Upscale the frame to the original resolution for display
-        display_frame = cv2.resize(frame_bgr, (640, 480))
-
-        cv2.imshow("YOLOv8 - Object Detection with Distance", display_frame)
-        depth_image = cv2.applyColorMap(cv2.convertScaleAbs(depth_data, alpha=0.05), cv2.COLORMAP_JET)
+        # Display the final frame
+        diplay = cv2.resize(frame_bgr, (640, 480))
+        cv2.imshow("YOLOv8 - Object Detection with Distance", display)
+        depth_image = cv2.applyColorMap(cv2.convertScaleAbs(interpolated_depth_data, alpha=0.05), cv2.COLORMAP_JET)
         depth_image = cv2.resize(depth_image, (640, 480))  # Upscale depth image
         cv2.imshow("Depth Image", depth_image)
 
