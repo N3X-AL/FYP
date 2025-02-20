@@ -15,6 +15,12 @@ RUN apt-get update && apt-get install -y \
     openni2-utils \
     zlib1g-dev \
     libzbar0 \
+    usbutils \
+    libusb-1.0-0-dev \
+    udev \
+    libxi6 \
+    libxmu6 \
+    libudev-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --cache-dir /root/.cache/pip -r Requirements.txt
 CMD ["python3" , "newalgo.py", "-u"]
