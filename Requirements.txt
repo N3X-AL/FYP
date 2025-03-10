@@ -1,2 +1,6 @@
 numpy
 opencv-python
+pyzbar
+ultralytics
+cython
+#pylibfreenect2 this is to be installed either from pip or from source

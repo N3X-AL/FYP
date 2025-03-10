@@ -36,6 +36,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 
 
 # Install pylibfreenect2
+# RUN pip install -r Requirements.txt
 RUN pip install numpy opencv-python cython
 RUN cd ~ && git clone https://github.com/r9y9/pylibfreenect2.git \
     && cd pylibfreenect2 \
