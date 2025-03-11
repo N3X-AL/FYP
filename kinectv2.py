@@ -1,6 +1,8 @@
 from pylibfreenect2 import Freenect2, Freenect2Device, FrameType, SyncMultiFrameListener
 import cv2
 import numpy as np
+from ultralytics import YOLO
+model = YOLO('yolov8n.pt')
 
 fn = Freenect2()
 if fn.enumerateDevices() == 0:
