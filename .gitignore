@@ -4,3 +4,4 @@ Scripts
 Include
 .vscode
 pyvenv.cfg
+components/__pycache__/

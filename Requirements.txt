@@ -1,7 +1,6 @@
 numpy
 opencv-python
-openni
 pyzbar
 ultralytics
-#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
-#threading // part of standard python installation
+cython
+#pylibfreenect2 this is to be installed either from pip or from source
