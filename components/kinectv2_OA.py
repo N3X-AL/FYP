@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import time
 
-class Kinect:
+class OA:
     def __init__(self, min_distance=0.2, max_distance=2.0):
         self.min_distance = min_distance
         self.max_distance = max_distance
