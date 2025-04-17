@@ -1,141 +1,134 @@
-# components/kinectv2_OA.py
+# /home/aleeya/FYP/fyp2/FYP/components/kinectv2_OA.py
 import cv2
 import numpy as np
-import time
 
 class OA:
-    def __init__(self, obstacle_min_dist_m=0.8, check_width_px=300, roi_y_start_frac=1/3, roi_y_end_frac=2/3, mask_dilation_pixels=10): # Added mask_dilation_pixels
-        print("Initializing Obstacle Avoidance Module...")
-        self.obstacle_min_distance_m = obstacle_min_dist_m
-        self.obstacle_check_width_px = check_width_px
-        self.obstacle_check_roi_y_start = roi_y_start_frac
-        self.obstacle_check_roi_y_end = roi_y_end_frac
-        self.mask_dilation_pixels = mask_dilation_pixels # Pixels to expand the mask box
-
-        # --- Attributes ---
-        self.depth_map_resized_mm = None # Store the resized depth map
-        self.masked_depth_mm = None      # Store the depth map with target masked
-        self.obstacle_detected = False   # Flag for obstacle detection result
-        self.obstacle_roi_coords = None  # Store ROI coords for drawing (x1, y1, x2, y2)
-        self.dilated_mask_coords = None  # Store the dilated box coords for potential debugging/vis
-
-    def _check_for_obstacles(self, masked_depth_data):
+    def __init__(self, obstacle_min_dist_m=0.8, roi_width_ratio=0.4, roi_top_ratio=0.3, roi_bottom_ratio=0.9):
         """
-        Internal helper to check for obstacles in the central ROI of the masked depth map.
-        """
-        height, frame_width = masked_depth_data.shape
-        center_x = frame_width // 2
-
-        roi_x1 = max(0, center_x - self.obstacle_check_width_px // 2)
-        roi_x2 = min(frame_width, center_x + self.obstacle_check_width_px // 2)
-        roi_y1 = int(height * self.obstacle_check_roi_y_start)
-        roi_y2 = int(height * self.obstacle_check_roi_y_end)
-
-        self.obstacle_roi_coords = (roi_x1, roi_y1, roi_x2, roi_y2) # Store for drawing
-
-        if roi_x1 >= roi_x2 or roi_y1 >= roi_y2:
-            # print("Warning: Invalid obstacle ROI") # Debugging
-            return False # Invalid ROI
-
-        obstacle_roi = masked_depth_data[roi_y1:roi_y2, roi_x1:roi_x2]
-
-        # Filter out invalid depth values (0) and the masked values (e.g., 65535)
-        # Convert valid readings from mm to meters for comparison
-        valid_depths_mm = obstacle_roi[(obstacle_roi > 0) & (obstacle_roi < 65535)]
-        if valid_depths_mm.size == 0:
-            # print("No valid depth points in obstacle ROI") # Debugging
-            return False # No valid depth points in ROI to check
-
-        min_depth_in_roi_m = np.min(valid_depths_mm) / 1000.0
-        # print(f"Min depth in obstacle ROI: {min_depth_in_roi_m:.2f}m") # Debugging
-
-        return min_depth_in_roi_m < self.obstacle_min_distance_m
-
-    def process_depth_and_check_obstacles(self, depth_frame_raw, target_person_box, target_shape_wh):
-        """
-        Resizes depth map, masks the target person (using a dilated box), and checks for obstacles.
-        Updates internal attributes.
+        Initializes the Obstacle Avoidance module.
         Args:
-            depth_frame_raw: Raw depth frame (numpy array, float32 mm).
-            target_person_box: Bounding box (x1, y1, x2, y2) of the target person, or None.
-            target_shape_wh: Target (W, H) for resizing (usually color frame shape).
+            obstacle_min_dist_m (float): Minimum distance for an object to be considered an obstacle (in meters).
+            roi_width_ratio (float): Width of the central ROI as a ratio of the frame width.
+            roi_top_ratio (float): Top boundary of the ROI as a ratio of frame height.
+            roi_bottom_ratio (float): Bottom boundary of the ROI as a ratio of frame height.
         """
-        # 1. Resize depth map
-        # Using INTER_NEAREST is crucial for depth data
-        self.depth_map_resized_mm = cv2.resize(
-            depth_frame_raw,
-            target_shape_wh, # (width, height)
-            interpolation=cv2.INTER_NEAREST
-        )
+        self.obstacle_min_distance_mm = obstacle_min_dist_m * 1000.0
+        self.roi_width_ratio = roi_width_ratio
+        self.roi_top_ratio = roi_top_ratio
+        self.roi_bottom_ratio = roi_bottom_ratio
+        print(f"Obstacle Avoidance initialized. Min distance: {obstacle_min_dist_m}m ({self.obstacle_min_distance_mm}mm)")
 
-        # 2. Create Masked Depth Map
-        self.masked_depth_mm = self.depth_map_resized_mm.copy()
-        self.dilated_mask_coords = None # Reset dilated coords
+        self.obstacle_detected = False
+        self.depth_vis = None
+        self.masked_depth_vis = None
 
-        if target_person_box is not None:
-            px1, py1, px2, py2 = target_person_box
-            h, w = self.masked_depth_mm.shape # Get dimensions of the map we are masking
+    # --- Updated Method Signature ---
+    def process_depth_and_check_obstacles(self, depth_map_proc_res_mm, target_person_mask, processing_resolution):
+        """
+        Processes the depth map to check for obstacles in a central ROI, excluding the target person using their segmentation mask.
 
-            # --- DILATE the bounding box ---
-            # Subtract from top-left (x1, y1), add to bottom-right (x2, y2)
-            # Ensure coordinates stay within the frame bounds (0 to w-1, 0 to h-1)
-            dilated_x1 = max(0, px1 - self.mask_dilation_pixels)
-            dilated_y1 = max(0, py1 - self.mask_dilation_pixels)
-            dilated_x2 = min(w, px2 + self.mask_dilation_pixels) # Use w, h for upper bounds in slicing
-            dilated_y2 = min(h, py2 + self.mask_dilation_pixels)
-            # --- Store for debugging/visualization if needed ---
-            self.dilated_mask_coords = (dilated_x1, dilated_y1, dilated_x2, dilated_y2)
+        Args:
+            depth_map_proc_res_mm (np.ndarray): Depth map (float32, mm) resized to PROCESSING_RESOLUTION.
+            target_person_mask (np.ndarray | None): Boolean mask (same shape as depth map) where True indicates the target person, or None.
+            processing_resolution (tuple): (width, height) of the processed frame/depth map.
+        """
+        self.obstacle_detected = False
+        self.depth_vis = None
+        self.masked_depth_vis = None
 
-            # Set depth within the *dilated* target person's box to a large value (e.g., 65535)
-            # Use the calculated dilated coordinates
-            if dilated_y1 < dilated_y2 and dilated_x1 < dilated_x2: # Check if valid area after dilation/clipping
-                 self.masked_depth_mm[dilated_y1:dilated_y2, dilated_x1:dilated_x2] = 65535.0 # Use float if base is float
+        if depth_map_proc_res_mm is None:
+            print("Warning [OA]: Received None depth map.")
+            return
 
-        # 3. Check for Obstacles using the masked map
-        self.obstacle_detected = self._check_for_obstacles(self.masked_depth_mm)
+        proc_h, proc_w = depth_map_proc_res_mm.shape[:2]
+        if proc_w != processing_resolution[0] or proc_h != processing_resolution[1]:
+             print(f"Warning [OA]: Depth map shape {depth_map_proc_res_mm.shape} doesn't match processing_resolution {processing_resolution}")
+             # Attempt to proceed, but ROI/mask calculations might be off
+
+        # --- 1. Create Mask to Exclude Target Person ---
+        # Start with a mask that includes everything (True means check this pixel for obstacles)
+        obstacle_check_mask = np.ones_like(depth_map_proc_res_mm, dtype=bool)
+
+        # If a target person mask is provided, set those pixels to False in our check mask
+        if target_person_mask is not None:
+            # Ensure the provided mask has the same shape as the depth map
+            if target_person_mask.shape == obstacle_check_mask.shape:
+                # Where target_person_mask is True (person is present),
+                # set obstacle_check_mask to False (do not check these pixels).
+                obstacle_check_mask[target_person_mask] = False
+            else:
+                print(f"Warning [OA]: Target person mask shape {target_person_mask.shape} "
+                      f"does not match depth map shape {obstacle_check_mask.shape}. Ignoring mask.")
+                # Keep obstacle_check_mask as all True if shapes mismatch
+
+        # --- 2. Define Central ROI ---
+        # (ROI definition remains the same)
+        roi_w = int(proc_w * self.roi_width_ratio)
+        roi_x_start = (proc_w - roi_w) // 2
+        roi_x_end = roi_x_start + roi_w
+        roi_y_start = int(proc_h * self.roi_top_ratio)
+        roi_y_end = int(proc_h * self.roi_bottom_ratio)
+
+        # Ensure ROI coordinates are valid
+        roi_x_start, roi_y_start = max(0, roi_x_start), max(0, roi_y_start)
+        roi_x_end, roi_y_end = min(proc_w, roi_x_end), min(proc_h, roi_y_end)
+
+        if roi_x_start >= roi_x_end or roi_y_start >= roi_y_end:
+            print("Warning [OA]: Invalid ROI calculated.")
+            return
+
+        # --- 3. Check for Obstacles in ROI (using the exclusion mask) ---
+        # Extract the depth values within the ROI
+        roi_depth = depth_map_proc_res_mm[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+        # Extract the corresponding exclusion mask values for the ROI
+        roi_obstacle_check_mask = obstacle_check_mask[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+
+        # Find pixels within the ROI that are:
+        # 1. Valid depth (> 0)
+        # 2. Closer than the minimum obstacle distance
+        # 3. NOT part of the target person (where roi_obstacle_check_mask is True)
+        valid_obstacle_pixels = roi_depth[
+            (roi_depth > 0) &
+            (roi_depth < self.obstacle_min_distance_mm) &
+            roi_obstacle_check_mask # Only check pixels where the mask is True
+        ]
+
+        if valid_obstacle_pixels.size > 0:
+            self.obstacle_detected = True
+            # min_obstacle_dist_mm = np.min(valid_obstacle_pixels) # Optional debug
+            # print(f"Obstacle detected! Closest distance: {min_obstacle_dist_mm / 1000.0:.2f}m")
+
+
+        # --- 4. Create Visualizations (Optional) ---
+        try:
+            # Depth colormap (same as before)
+            depth_colormap = cv2.normalize(depth_map_proc_res_mm, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            depth_colormap = cv2.applyColorMap(depth_colormap, cv2.COLORMAP_JET)
+            depth_colormap[depth_map_proc_res_mm == 0] = [0, 0, 0]
+            cv2.rectangle(depth_colormap, (roi_x_start, roi_y_start), (roi_x_end, roi_y_end), (255, 255, 255), 2)
+            self.depth_vis = depth_colormap
+
+            # Masked depth visualization (using the actual mask now)
+            masked_depth_map = depth_map_proc_res_mm.copy()
+            # Black out the target area using the obstacle_check_mask (where it's False)
+            masked_depth_map[~obstacle_check_mask] = 0
+            masked_colormap = cv2.normalize(masked_depth_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+            masked_colormap = cv2.applyColorMap(masked_colormap, cv2.COLORMAP_JET)
+            masked_colormap[masked_depth_map == 0] = [0, 0, 0] # Black out invalid depth and target
+            cv2.rectangle(masked_colormap, (roi_x_start, roi_y_start), (roi_x_end, roi_y_end), (0, 0, 255), 1)
+            self.masked_depth_vis = masked_colormap
+
+        except Exception as e:
+            print(f"Warning [OA]: Failed to create visualizations: {e}")
+            self.depth_vis = None
+            self.masked_depth_vis = None
+
 
     def get_obstacle_status(self):
-        """Returns True if an obstacle was detected."""
+        """Returns True if an obstacle was detected in the ROI, False otherwise."""
         return self.obstacle_detected
 
     def get_depth_visualizations(self):
-        """Returns visualized depth maps (raw resized and masked)."""
-        if self.depth_map_resized_mm is None:
-            return None, None
-
-        # Raw Depth Map Visualization
-        depth_image_vis = cv2.applyColorMap(
-            cv2.convertScaleAbs(self.depth_map_resized_mm, alpha=0.05), # Adjust alpha for visibility
-            cv2.COLORMAP_JET
-        )
-        # Draw ROI on raw depth vis
-        if self.obstacle_roi_coords:
-            r_x1, r_y1, r_x2, r_y2 = self.obstacle_roi_coords
-            cv2.rectangle(depth_image_vis, (r_x1, r_y1), (r_x2, r_y2), (255, 255, 255), 2) # White ROI box
-
-        # Masked Depth Map Visualization
-        masked_depth_vis = None
-        if self.masked_depth_mm is not None:
-            # Create a version for visualization where masked area is distinctly visible (e.g., black)
-            vis_masked = self.masked_depth_mm.copy()
-            vis_masked[vis_masked == 65535.0] = 0 # Set masked area to 0 for visualization
-            masked_depth_vis = cv2.applyColorMap(
-                cv2.convertScaleAbs(vis_masked, alpha=0.05),
-                cv2.COLORMAP_JET
-            )
-            # Make the actual masked area black on the color map for clarity
-            masked_depth_vis[self.masked_depth_mm == 65535.0] = [0, 0, 0] # Black color
-
-            # Draw ROI on masked depth vis
-            if self.obstacle_roi_coords:
-                 r_x1, r_y1, r_x2, r_y2 = self.obstacle_roi_coords
-                 cv2.rectangle(masked_depth_vis, (r_x1, r_y1), (r_x2, r_y2), (255, 255, 255), 2) # White ROI box
-
-            # Optional: Draw the dilated box used for masking (e.g., in red) for debugging
-            # if self.dilated_mask_coords:
-            #     dx1, dy1, dx2, dy2 = self.dilated_mask_coords
-            #     cv2.rectangle(masked_depth_vis, (dx1, dy1), (dx2, dy2), (0, 0, 255), 1) # Red thin box
-
-
-        return depth_image_vis, masked_depth_vis
+        """Returns the depth visualization frames (can be None)."""
+        return self.depth_vis, self.masked_depth_vis
 
