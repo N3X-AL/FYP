@@ -1,6 +1,7 @@
 # /home/aleeya/FYP/fyp2/FYP/components/Kinectv2_motors.py
 import time
-# import serial # Uncomment if using serial communication (like for Arduino)
+import serial # <<< Make sure this line is uncommented >>>
+import atexit # <<< Add this if you want automatic cleanup >>>
 
 class motors:
     def __init__(self, serial_port='/dev/ttyACM0', baud_rate=9600):
@@ -9,100 +10,110 @@ class motors:
         Replace this with your actual motor hardware setup.
         """
         self.motor_enabled = False
+        self.arduino = None # <<< Initialize arduino attribute >>>
+        self.port = serial_port # <<< Store port for cleanup >>>
         print("Initializing Motors...")
 
         # --- Example: Serial Connection (Uncomment and adapt if needed) ---
-        # try:
-        #     self.arduino = serial.Serial(serial_port, baud_rate, timeout=1)
-        #     time.sleep(2) # Wait for connection to establish
-        #     print(f"Successfully connected to motors via {serial_port}")
-        #     self.motor_enabled = True
-        # except serial.SerialException as e:
-        #     print(f"ERROR: Failed to connect to motors on {serial_port}: {e}")
-        #     print("Motor commands will be simulated.")
-        #     self.motor_enabled = False
+        # vvv UNCOMMENT THIS BLOCK vvv
+        try:
+            print(f"Attempting to connect to Arduino on {serial_port} at {baud_rate} baud...") # <<< Add print >>>
+            self.arduino = serial.Serial(serial_port, baud_rate, timeout=1)
+            time.sleep(2) # Wait for connection to establish/Arduino reset
+            print(f"Successfully connected to motors via {serial_port}")
+            self.motor_enabled = True
+            atexit.register(self.cleanup) # <<< Register cleanup >>>
+        except serial.SerialException as e:
+            print(f"ERROR: Failed to connect to motors on {serial_port}: {e}")
+            print("Motor commands will be simulated.")
+            self.motor_enabled = False
+        # ^^^ UNCOMMENT THIS BLOCK ^^^
         # --------------------------------------------------------------------
 
-        # If no hardware connection, motor commands will just print
+        # This part is fine, it handles the simulation case if connection fails
         if not self.motor_enabled:
-             print("Motor hardware not connected. Commands will be simulated.")
-             self.motor_enabled = True # Set to True to allow simulation prints
+             # This print is expected if the try block fails
+             # print("Motor hardware not connected. Commands will be simulated.")
+             # Keep motor_enabled as False if connection failed
+             pass # No need to set motor_enabled to True here
 
-        print("Motors Initialized (Simulated or Connected).")
-
+        print("Motors Initialized.") # Simplified message
 
     def _send_command(self, command):
         """ Helper function to send commands (adapt for your hardware) """
-        if self.motor_enabled:
+        if self.motor_enabled and self.arduino and self.arduino.is_open: # <<< Check arduino object too >>>
             # --- Example: Serial Command ---
-            # try:
-            #     full_command = f"{command}\n"
-            #     self.arduino.write(full_command.encode())
-            #     # print(f"Sent: {command}") # Optional: print sent command
-            #     # time.sleep(0.05) # Optional small delay
-            # except Exception as e:
-            #     print(f"Error sending command '{command}': {e}")
+            # vvv UNCOMMENT THIS BLOCK vvv
+            try:
+                full_command = f"{command}\n"
+                self.arduino.write(full_command.encode('utf-8')) # <<< Specify encoding >>>
+                # print(f"Sent: {command}") # Optional: print sent command
+                # time.sleep(0.05) # Optional small delay
+            except Exception as e:
+                print(f"Error sending command '{command}': {e}")
+            # ^^^ UNCOMMENT THIS BLOCK ^^^
             # -------------------------------
 
-            # --- Simulation ---
-            # print(f"Simulating Command: {command}") # Keep this for simulation
-            pass # In simulation, just printing the action is enough (done in methods below)
+            # --- Simulation (Remove or keep commented if using hardware) ---
+            # print(f"Simulating Command: {command}")
+            # pass
 
         else:
-            # This case should ideally not be reached if constructor handles init failure
-            print("Motor interface not enabled. Cannot send command.")
+            # Print a warning if trying to send command without connection
+            if not self.motor_enabled:
+                print(f"Warning: Motor hardware connection failed. Simulating command: {command}")
+            else: # Should not happen if init is correct
+                 print(f"Warning: Arduino not available. Cannot send command: {command}")
+
+    # --- Keep the rest of your motor methods (move_forward, turn_left, etc.) ---
+    # They correctly call _send_command with the full word commands.
 
     def move_forward(self):
-        """ Commands the robot to move forward. """
-        print("Action: Move Forward") # Keep this print
-        # Add your actual hardware command here
-        self._send_command("FORWARD") # Example command string
+        print("Action: Move Forward")
+        self._send_command("FORWARD")
 
     def turn_left(self):
-        """ Commands the robot to turn left. """
-        print("Action: Turn Left") # Keep this print
-        # Add your actual hardware command here
-        self._send_command("LEFT") # Example command string
+        print("Action: Turn Left")
+        self._send_command("LEFT")
 
     def turn_right(self):
-        """ Commands the robot to turn right. """
-        print("Action: Turn Right") # Keep this print
-        # Add your actual hardware command here
-        self._send_command("RIGHT") # Example command string
+        print("Action: Turn Right")
+        self._send_command("RIGHT")
 
     def stop_motors(self):
-        """ Commands the robot to stop all movement. """
-        print("Action: Stop Motors") # Keep this print
-        # Add your actual hardware command here
-        self._send_command("STOP") # Example command string
+        print("Action: Stop Motors")
+        self._send_command("STOP")
+
+    def move_slow_forward(self):
+        print("Action: Move Slow Forward")
+        self._send_command("FORWARD_SLOW")
+
+    def move_normal_forward(self):
+        print("Action: Move Normal Forward")
+        self._send_command("FORWARD")
 
     def cleanup(self):
         """ Clean up resources (e.g., close serial port) """
         print("Cleaning up motor interface...")
         # --- Example: Close Serial ---
-        # if self.motor_enabled and hasattr(self, 'arduino') and self.arduino.is_open:
-        #     try:
-        #         self.arduino.close()
-        #         print("Serial port closed.")
-        #     except Exception as e:
-        #         print(f"Error closing serial port: {e}")
+        # vvv UNCOMMENT THIS BLOCK vvv
+        if self.motor_enabled and hasattr(self, 'arduino') and self.arduino and self.arduino.is_open:
+            try:
+                # Send a final stop command before closing
+                print("Sending final stop command before closing port...")
+                self.stop_motors()
+                time.sleep(0.1) # Give time for command to be sent/processed
+                print(f"Closing serial port {self.port}...")
+                self.arduino.close()
+                print("Serial port closed.")
+            except Exception as e:
+                print(f"Error closing serial port: {e}")
+        # ^^^ UNCOMMENT THIS BLOCK ^^^
         # -----------------------------
+        elif hasattr(self, 'arduino') and self.arduino:
+             print("Serial port was not open.")
+        else:
+             print("No serial connection was established.")
 
 
-# --- Original Servo Example (for reference if needed) ---
-# import serial
-# import time
-# # Connect to Arduino's serial port
-# arduino = serial.Serial('/dev/ttyACM0', 9600)
-# time.sleep(2)  # Wait for Arduino to reset
-# def set_servo_angle(angle):
-#     command = f"servo:{angle}\n"
-#     arduino.write(command.encode())
-#     print(f"Sent: {command.strip()}")
-# # Example usage
-# set_servo_angle(90)
-# time.sleep(1)
-# set_servo_angle(0)
-# arduino.close()
-# --- End Servo Example ---
-
+# --- Remove or comment out the old Servo Example ---
