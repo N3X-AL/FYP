@@ -63,12 +63,12 @@ void loop() {
           setMotorBSpeed(SLOW_SPEED);
         } else if (command == "LEFT") { // Check for "LEFT"
           Serial.println("Action: Turning Left (Spin)");
-          setMotorASpeed(-TURN_SPEED); // Spin turn: Left backward
+          setMotorASpeed(0); // Spin turn: Left backward
           setMotorBSpeed(TURN_SPEED);  // Spin turn: Right forward
         } else if (command == "RIGHT") { // Check for "RIGHT"
           Serial.println("Action: Turning Right (Spin)");
           setMotorASpeed(TURN_SPEED);   // Spin turn: Left forward
-          setMotorBSpeed(-TURN_SPEED); // Spin turn: Right backward
+          setMotorBSpeed(0); // Spin turn: Right backward
         } else if (command == "STOP") { // Check for "STOP"
           Serial.println("Action: Stopping Motors");
           stopAllMotors();

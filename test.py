@@ -79,7 +79,7 @@ class FrameAcquisitionThread(threading.Thread):
                 # --- Process Color Frame ---
                 color_data_rgba = color_frame.asarray(np.uint8)
                 color_data_rgba = np.ascontiguousarray(color_data_rgba)
-                frame_bgr_full = cv2.cvtColor(color_data_rgba, cv2.COLOR_RGBA2BGR)
+                frame_bgr_full = cv2.cvtColor(color_data_rgba, cv2.COLOR_RGBA2RGB)
                 frame_bgr_proc = cv2.resize(frame_bgr_full, PROCESSING_RESOLUTION, interpolation=cv2.INTER_LINEAR)
 
                 # --- Get Raw Depth Data ---
@@ -231,7 +231,6 @@ class ProcessingThread(threading.Thread):
                     depth_limited_proc_mm,
                     qr_details_for_yoloqr
                 )
-                target_person_mask = self.yolo_qr_processor.get_target_person_mask() # <<< Get mask for visualization >>>
                 target_person_box = self.yolo_qr_processor.get_target_person_box()
                 _, _, target_distance_m = self.yolo_qr_processor.get_qr_details()
                 yolo_boxes_for_drawing, _ = self.yolo_qr_processor.get_drawing_info()
@@ -242,11 +241,15 @@ class ProcessingThread(threading.Thread):
                 # depth_vis, masked_depth_vis = self.obstacle_avoidance.get_depth_visualizations() # <<< REMOVED OA RESULT >>>
 
                 # --- 4b. Generate Depth Visualizations Manually ---
-                # <<< UPDATED: Pass QR distance to depth visualization >>>
                 depth_vis, masked_depth_vis = self._create_depth_visualizations(
                     depth_limited_proc_mm,
                     target_distance_m  # Pass the QR code distance
                 )
+
+                # Check for obstacles in the masked depth map after masking
+                obstacle_detected = False
+                if masked_depth_vis is not None and np.count_nonzero(masked_depth_vis) > 200:  # Check for non-black pixels
+                    obstacle_detected = True
 
                 # --- 5. Store Results Safely ---
                 with results_lock:
@@ -256,11 +259,11 @@ class ProcessingThread(threading.Thread):
                     latest_results["target_distance_m"] = target_distance_m
                     latest_results["yolo_boxes_for_drawing"] = copy.copy(yolo_boxes_for_drawing)
                     latest_results["qr_bbox_int_draw"] = qr_bbox_int_draw_proc_res
-                    # latest_results["obstacle_detected"] = obstacle_detected # <<< REMOVED OA RESULT >>>
                     latest_results["vis_frame"] = frame_bgr_proc_copy
-                    latest_results["depth_vis"] = depth_vis # <<< Store manually generated viz >>>
-                    latest_results["masked_depth_vis"] = masked_depth_vis # <<< Store manually generated viz >>>
+                    latest_results["depth_vis"] = depth_vis
+                    latest_results["masked_depth_vis"] = masked_depth_vis
                     latest_results["timestamp"] = current_frame_time
+                    latest_results["obstacle_detected"] = obstacle_detected  # Store obstacle status
 
             except Exception as e:
                 print(f"!!! Unhandled Error in {self.name}: {e}")
@@ -344,7 +347,7 @@ if __name__ == "__main__":
             color_frame_reg = frames_reg[FrameType.Color]
             color_data_rgba_reg = color_frame_reg.asarray(np.uint8)
             color_data_rgba_reg = np.ascontiguousarray(color_data_rgba_reg)
-            frame_bgr_reg = cv2.cvtColor(color_data_rgba_reg, cv2.COLOR_RGBA2BGR)
+            frame_bgr_reg = cv2.cvtColor(color_data_rgba_reg, cv2.COLOR_RGBA2RGB)
 
             qr_data = None
             qr_bbox_draw = None
@@ -449,6 +452,7 @@ if __name__ == "__main__":
                     qr_center_x = local_results.get("qr_center_x")
                     vis_frame_proc = local_results.get("vis_frame")
                     target_person_box = local_results.get("target_person_box")
+                    obstacle_detected = local_results.get("obstacle_detected", False)
 
                     if vis_frame_proc is None:
                         time.sleep(0.01)
@@ -483,6 +487,10 @@ if __name__ == "__main__":
                         elif qr_center_x > frame_center_x + QR_FOLLOW_TOLERANCE:
                             next_action = "Turning Left" # Changed from Right
                             robot_motors.turn_left() # Changed from turn_right
+                        elif obstacle_detected:
+                            next_action = "Obstacle Detected"
+                            print("Stopping due to obstacle detected.")  # Add debug print
+                            robot_motors.stop_motors()
                         else: # Centered and QR detected
                             next_action = "Moving Normal Forward (QR Centered)"
                             robot_motors.move_normal_forward()
@@ -527,9 +535,9 @@ if __name__ == "__main__":
                         cv2.rectangle(vis_frame, (x1, y1), (x2, y2), color, thickness)
                         cv2.putText(vis_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                    # Draw Obstacle Warning (REMOVED)
-                    # if obstacle_detected:
-                    #     cv2.putText(vis_frame, "OBSTACLE!", ...)
+                    # Draw Obstacle Warning
+                    if obstacle_detected:
+                        cv2.putText(vis_frame, "OBSTACLE!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
 
                     # Draw current action status
                     cv2.putText(vis_frame, f"Action: {current_action}", (10, PROCESSING_HEIGHT - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
