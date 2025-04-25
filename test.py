@@ -16,7 +16,7 @@ from components.Kinectv2_motors import motors
 
 # --- Constants and Initializations ---
 PROCESSING_WIDTH = 640
-PROCESSING_HEIGHT = 480
+PROCESSING_HEIGHT = 360
 PROCESSING_RESOLUTION = (PROCESSING_WIDTH, PROCESSING_HEIGHT)
 YOLO_IMG_SIZE = 640
 
@@ -118,7 +118,7 @@ class ProcessingThread(threading.Thread):
         print(f"{self.name} Initialized (Obstacle Avoidance Disabled)")
 
     # <<< ADDED Helper for Depth Visualization >>>
-    def _create_depth_visualizations(self, depth_map_mm, qr_distance_m=None):
+    def _create_depth_visualizations(self, depth_map_mm, qr_distance_m=None, qr_center_x=None):
         """Creates colormapped depth and masked depth visualizations."""
         depth_vis = None
         masked_depth_vis = None
@@ -126,13 +126,12 @@ class ProcessingThread(threading.Thread):
         try:
             # Normalize depth for visualization (0-1 range, handling potential division by zero)
             max_depth_viz = DEPTH_PROCESSING_LIMIT_MM
-            if max_depth_viz <= 0: max_depth_viz = 1.0 # Avoid division by zero if limit is bad
+            if max_depth_viz <= 0: max_depth_viz = 1.0  # Avoid division by zero
 
             # Create basic depth visualization
             depth_normalized = np.clip(depth_map_mm / max_depth_viz, 0, 1)
             depth_vis = cv2.applyColorMap((depth_normalized * 255).astype(np.uint8), cv2.COLORMAP_JET)
-            # Set invalid depth (0mm) to black in visualization
-            depth_vis[depth_map_mm == 0] = [0, 0, 0]
+            depth_vis[depth_map_mm == 0] = [0, 0, 0]  # Set invalid depth (0mm) to black
 
             # Create masked depth visualization (exclude anything behind QR code)
             masked_depth_map = depth_map_mm.copy()
@@ -141,11 +140,25 @@ class ProcessingThread(threading.Thread):
                 exclusion_threshold_mm = qr_distance_mm - 200.0  # Subtract 0.2 meters
                 masked_depth_map[depth_map_mm > exclusion_threshold_mm] = 0
 
+            # --- Dynamically adjust the 200-pixel-wide region based on qr_center_x ---
+            height, width = masked_depth_map.shape
+            if qr_center_x is not None:
+                left_bound = max(0, qr_center_x - 100)
+                right_bound = min(width, qr_center_x + 100)
+            else:
+                # Default to center if qr_center_x is not provided
+                center_x = width // 2
+                left_bound = max(0, center_x - 100)
+                right_bound = min(width, center_x + 100)
+
+            # Set all pixels outside the dynamically adjusted region to 0
+            masked_depth_map[:, :left_bound] = 0  # Remove pixels to the left of the region
+            masked_depth_map[:, right_bound:] = 0  # Remove pixels to the right of the region
+
             # Normalize and colormap the masked depth
             masked_depth_normalized = np.clip(masked_depth_map / max_depth_viz, 0, 1)
             masked_depth_vis = cv2.applyColorMap((masked_depth_normalized * 255).astype(np.uint8), cv2.COLORMAP_JET)
-            # Set invalid depth (0mm, including masked area) to black
-            masked_depth_vis[masked_depth_map == 0] = [0, 0, 0]
+            masked_depth_vis[masked_depth_map == 0] = [0, 0, 0]  # Set invalid depth (0mm, including masked area) to black
 
         except Exception as e:
             print(f"Error creating depth visualizations: {e}")
@@ -225,11 +238,15 @@ class ProcessingThread(threading.Thread):
                 depth_limited_proc_mm = depth_resized_proc_mm.copy()
                 depth_limited_proc_mm[~valid_depth_mask] = 0
 
+                #variable initialization
+                obstacle_detected = False
+                
                 # --- 3. Run YOLO Detections & Association/Tracking ---
                 self.yolo_qr_processor.run_detections_and_association(
                     frame_bgr_proc_copy,
                     depth_limited_proc_mm,
-                    qr_details_for_yoloqr
+                    qr_details_for_yoloqr,
+                    obstacle_detected
                 )
                 target_person_box = self.yolo_qr_processor.get_target_person_box()
                 _, _, target_distance_m = self.yolo_qr_processor.get_qr_details()
@@ -243,11 +260,11 @@ class ProcessingThread(threading.Thread):
                 # --- 4b. Generate Depth Visualizations Manually ---
                 depth_vis, masked_depth_vis = self._create_depth_visualizations(
                     depth_limited_proc_mm,
-                    target_distance_m  # Pass the QR code distance
+                    target_distance_m,  # Pass the QR code distance
+                    qr_details_for_yoloqr['center'][0] if qr_details_for_yoloqr else None  # Pass the QR code center x-coordinate
                 )
 
                 # Check for obstacles in the masked depth map after masking
-                obstacle_detected = False
                 if masked_depth_vis is not None and np.count_nonzero(masked_depth_vis) > 200:  # Check for non-black pixels
                     obstacle_detected = True
 
@@ -415,11 +432,37 @@ if __name__ == "__main__":
     acquisition_thread.start()
     processing_thread.start()
 
-    # --- Main Navigation Loop (Uses latest results - OA Logic Removed) ---
+    # --- PID Controller Parameters ---
+    KP_DISTANCE = 1.0  # Proportional gain for distance
+    KP_ANGLE = 0.7     # Proportional gain for angle
+    KI = 0.0           # Integral gain (set to 0 if not needed)
+    KD = 0.1           # Derivative gain
+
+    pid_integral_angle = 0
+    pid_last_error_angle = 0
+    pid_integral_distance = 0
+    pid_last_error_distance = 0
+
+    # Function to calculate base speed based on distance
+    def calculate_base_speed(distance):
+        """
+        Calculate the base speed of the robot based on the distance to the target.
+        - At distances greater than (TARGET_STOP_DISTANCE_M + 1 meter), the speed is capped at 255.
+        - At distances less than TARGET_STOP_DISTANCE_M, the speed ramps down to 0.
+        """
+        max_distance = TARGET_STOP_DISTANCE_M + 0.3 # 1 meter beyond the stop distance
+        if distance > max_distance:
+            return 255
+        elif distance < TARGET_STOP_DISTANCE_M:
+            return 0
+        else:
+            # Linear interpolation between TARGET_STOP_DISTANCE_M and max_distance
+            return int(255 * (distance - TARGET_STOP_DISTANCE_M) / (max_distance - TARGET_STOP_DISTANCE_M))
+
+    # --- Main Navigation Loop ---
     print("\n--- Starting Navigation ---")
     print(f"Following QR Code: '{target_qr_code}'")
     print(f"Target Stop Distance: {TARGET_STOP_DISTANCE_M}m")
-    # print(f"Obstacle Min Distance: {obstacle_avoidance.obstacle_min_distance_mm / 1000.0}m") # <<< REMOVED OA PRINT >>>
     print("Press 'q' in the 'Navigation View' window to quit.")
 
     last_result_time = 0
@@ -451,63 +494,55 @@ if __name__ == "__main__":
                     target_dist = local_results.get("target_distance_m", float('inf'))
                     qr_center_x = local_results.get("qr_center_x")
                     vis_frame_proc = local_results.get("vis_frame")
-                    target_person_box = local_results.get("target_person_box")
                     obstacle_detected = local_results.get("obstacle_detected", False)
 
                     if vis_frame_proc is None:
                         time.sleep(0.01)
                         continue
 
-                    # --- Decision Logic (OA Removed) ---
+                    # --- Decision Logic with PID ---
                     next_action = "Idle"
-                    action_changed = False
 
-                    # +++ Add Debug Prints Here +++
-                    print(f"DEBUG: qr_detected={qr_detected}, target_dist={target_dist:.3f}, qr_center_x={qr_center_x}, TARGET_STOP_DISTANCE_M={TARGET_STOP_DISTANCE_M}")
-                    # +++++++++++++++++++++++++++++
-
-                    if qr_detected: # QR detected takes precedence
+                    if obstacle_detected:
+                        next_action = "Obstacle Detected Stop"
+                        robot_motors.stop_motors()
+                    elif qr_detected:  # QR detected takes precedence
                         if target_dist == float('inf') or target_dist is None or np.isnan(target_dist):
                             next_action = "Invalid Distance Stop"
-                            print("DEBUG: Stopping due to invalid distance.") # Add print
+                            print("DEBUG: Stopping due to invalid distance.")
                             robot_motors.stop_motors()
                         elif target_dist <= TARGET_STOP_DISTANCE_M:
                             next_action = "Target Reached Stop"
-                            print(f"DEBUG: Stopping because target_dist ({target_dist:.3f}) <= TARGET_STOP_DISTANCE_M ({TARGET_STOP_DISTANCE_M})") # Add print
                             robot_motors.stop_motors()
-                        elif qr_center_x is None:
+                        elif qr_center_x is not None:
+                            # PID logic for angle adjustment
+                            error_angle = frame_center_x - qr_center_x
+                            pid_integral_angle += error_angle
+                            pid_derivative_angle = error_angle - pid_last_error_angle
+                            pid_last_error_angle = error_angle
+
+                            pid_output_angle = KP_ANGLE * error_angle + KI * pid_integral_angle + KD * pid_derivative_angle
+
+                            # Calculate base speed based on distance
+                            base_speed = calculate_base_speed(target_dist)
+
+                            # Adjust motor speeds based on both angle and distance
+                            right_motor_speed = max(0, min(255, base_speed - pid_output_angle))
+                            left_motor_speed = max(0, min(255, base_speed + pid_output_angle))
+
+                            robot_motors.set_motor_speeds(left_motor_speed, right_motor_speed)
+                            next_action = f"Adjusting with PID (L: {left_motor_speed}, R: {right_motor_speed}, Base: {base_speed})"
+                        else:
                             next_action = "QR Center Error Stop"
-                            print("DEBUG: Stopping due to QR center error.") # Add print
                             robot_motors.stop_motors()
-                        # <<< SWAPPED >>>
-                        elif qr_center_x < frame_center_x - QR_FOLLOW_TOLERANCE:
-                            next_action = "Turning Right" # Changed from Left
-                            robot_motors.turn_right() # Changed from turn_left
-                        # <<< SWAPPED >>>
-                        elif qr_center_x > frame_center_x + QR_FOLLOW_TOLERANCE:
-                            next_action = "Turning Left" # Changed from Right
-                            robot_motors.turn_left() # Changed from turn_right
-                        elif obstacle_detected:
-                            next_action = "Obstacle Detected"
-                            print("Stopping due to obstacle detected.")  # Add debug print
-                            robot_motors.stop_motors()
-                        else: # Centered and QR detected
-                            next_action = "Moving Normal Forward (QR Centered)"
-                            robot_motors.move_normal_forward()
-                    elif target_person_box is not None: # QR not detected, BUT still tracking
-                        next_action = "Tracking (Slow Forward)"
-                        robot_motors.move_slow_forward()
-                        # Optional: Add turning based on tracked box center if desired
-                    else: # Target QR not detected AND tracking lost
+                    else:
                         next_action = "Target Lost Stop"
-                        print("DEBUG: Stopping because target lost (no QR, no tracking).") # Add print
                         robot_motors.stop_motors()
 
                     # Print action only if it changed
                     if next_action != current_action:
                         print(f"Action: {next_action}")
-                        action_changed = True
-                    current_action = next_action
+                        current_action = next_action
 
                     # --- Visualization ---
                     vis_frame = vis_frame_proc.copy()
@@ -522,7 +557,7 @@ if __name__ == "__main__":
                                 qr_center_y_draw = int(np.mean(points[:, 0, 1]))
                                 cv2.circle(vis_frame, (qr_center_x, qr_center_y_draw), 5, (0, 0, 255), -1)
                                 dist_text = f"QR: {target_dist:.2f}m" if target_dist != float('inf') else "QR: Dist Invalid"
-                                cv2.putText(vis_frame, dist_text, (qr_center_x + 10, qr_center_y_draw), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                                cv2.putText(vis_frame, dist_text, (qr_center_x + 10, qr_center_y_draw), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 3)
                         except Exception as draw_err: print(f"Warning: Could not draw QR bbox: {draw_err}")
 
                     # Draw YOLO results
@@ -533,14 +568,14 @@ if __name__ == "__main__":
                         color = (255, 0, 0) if is_target else (0, 255, 0)
                         thickness = 3 if is_target else 2
                         cv2.rectangle(vis_frame, (x1, y1), (x2, y2), color, thickness)
-                        cv2.putText(vis_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                        cv2.putText(vis_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 3)
 
                     # Draw Obstacle Warning
                     if obstacle_detected:
                         cv2.putText(vis_frame, "OBSTACLE!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
 
                     # Draw current action status
-                    cv2.putText(vis_frame, f"Action: {current_action}", (10, PROCESSING_HEIGHT - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+                    cv2.putText(vis_frame, f"Action: {current_action}", (10, PROCESSING_HEIGHT - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 3)
 
                     # Display the main navigation view
                     cv2.imshow("Navigation View", vis_frame)

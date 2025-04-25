@@ -43,43 +43,19 @@ void setup() {
 void loop() {
   // Check if data is available to read from serial
   if (Serial.available() > 0) {
-    // Read the incoming command string until newline character
     String command = Serial.readStringUntil('\n');
-    command.trim(); // Remove leading/trailing whitespace and newline characters
+    command.trim();
 
-    // Process the received command if it's not empty
-    if (command.length() > 0) {
-        Serial.print("Received Command: ");
-        Serial.println(command); // Print the actual received command
-
-        // --- Updated Command Checks ---
-        if (command == "FORWARD") { // Check for "FORWARD" (used by move_forward and move_normal_forward)
-          Serial.println("Action: Moving Forward (Normal)");
-          setMotorASpeed(NORMAL_SPEED);
-          setMotorBSpeed(NORMAL_SPEED);
-        } else if (command == "FORWARD_SLOW") { // Check for "FORWARD_SLOW"
-          Serial.println("Action: Moving Forward (Slow)");
-          setMotorASpeed(SLOW_SPEED);
-          setMotorBSpeed(SLOW_SPEED);
-        } else if (command == "LEFT") { // Check for "LEFT"
-          Serial.println("Action: Turning Left (Spin)");
-          setMotorASpeed(0); // Spin turn: Left backward
-          setMotorBSpeed(TURN_SPEED);  // Spin turn: Right forward
-        } else if (command == "RIGHT") { // Check for "RIGHT"
-          Serial.println("Action: Turning Right (Spin)");
-          setMotorASpeed(TURN_SPEED);   // Spin turn: Left forward
-          setMotorBSpeed(0); // Spin turn: Right backward
-        } else if (command == "STOP") { // Check for "STOP"
-          Serial.println("Action: Stopping Motors");
-          stopAllMotors();
-        }
-        // Add other commands if needed (e.g., "BACKWARD")
-        // else if (command == "BACKWARD") { ... }
-         else { // Handle unknown commands
-          Serial.println("Action: Unknown command received.");
-          // Optional: Stop motors on unknown command for safety
-          // stopAllMotors();
-        }
+    if (command.startsWith("LEFT_SPEED:")) {
+      int left_speed = command.substring(11).toInt();
+      setMotorASpeed(left_speed);
+    } else if (command.startsWith("RIGHT_SPEED:")) {
+      int right_speed = command.substring(12).toInt();
+      setMotorBSpeed(right_speed);
+    } else if (command == "STOP") {
+      stopAllMotors();
+    } else {
+      Serial.println("Unknown command received.");
     }
   }
 }

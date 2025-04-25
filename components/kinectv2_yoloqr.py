@@ -10,7 +10,7 @@ import time
 
 class YoloQR:
     # <<< REVERT: Default device back to 'cpu' or let caller specify >>>
-    def __init__(self, yolo_model_path='yolov8n-seg.pt', yolo_img_size=640, conf_threshold=0.5, device='cpu',
+    def __init__(self, yolo_model_path='yolov8n.pt', yolo_img_size=640, conf_threshold=0.5, device='cpu',
                  persistence_frames=10,
                  association_radius_px=75):
         """
@@ -97,10 +97,11 @@ class YoloQR:
     def run_detections_and_association(self,
                                        frame_bgr_proc_res,
                                        depth_map_proc_res_mm,
-                                       qr_code_details_from_processor):
+                                       qr_code_details_from_processor,
+                                       obstacle_detected):
         """
         Runs YOLO, associates with external QR, uses KCF tracker for persistence.
-        # ... (rest of docstring) ...
+        Stops tracking if an obstacle is detected.
         """
         # --- Reset Frame-Specific State ---
         self.current_yolo_boxes_for_drawing = []
@@ -109,6 +110,15 @@ class YoloQR:
 
         proc_h, proc_w = frame_bgr_proc_res.shape[:2]
         target_size_wh_for_resize = (proc_w, proc_h)
+
+        # --- Stop if Obstacle is Detected ---
+        if obstacle_detected:
+            print("Obstacle detected! Stopping tracking.")
+            self.is_tracker_initialized = False
+            self.tracker = None
+            self.frames_since_last_confirmation = self.persistence_frames + 1
+            self._clear_current_target_state()
+            return  # Stop further processing if an obstacle is detected
 
         # --- 1. YOLO Detection ---
         frame_bgr_proc_res_cont = np.ascontiguousarray(frame_bgr_proc_res)

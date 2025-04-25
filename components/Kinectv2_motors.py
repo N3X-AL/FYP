@@ -65,32 +65,20 @@ class motors:
             else: # Should not happen if init is correct
                  print(f"Warning: Arduino not available. Cannot send command: {command}")
 
-    # --- Keep the rest of your motor methods (move_forward, turn_left, etc.) ---
-    # They correctly call _send_command with the full word commands.
-
-    def move_forward(self):
-        print("Action: Move Forward")
-        self._send_command("FORWARD")
-
-    def turn_left(self):
-        print("Action: Turn Left")
-        self._send_command("LEFT")
-
-    def turn_right(self):
-        print("Action: Turn Right")
-        self._send_command("RIGHT")
+    def set_motor_speeds(self, left_speed, right_speed):
+        """
+        Sets the speed of the left and right motors individually.
+        :param left_speed: Speed for the left motor (0-255).
+        :param right_speed: Speed for the right motor (0-255).
+        """
+        print(f"Action: Set Motor Speeds (Left: {left_speed}, Right: {right_speed})")
+        self._send_command(f"LEFT_SPEED:{int(left_speed)}")
+        self._send_command(f"RIGHT_SPEED:{int(right_speed)}")
 
     def stop_motors(self):
+        """Stops both motors."""
         print("Action: Stop Motors")
-        self._send_command("STOP")
-
-    def move_slow_forward(self):
-        print("Action: Move Slow Forward")
-        self._send_command("FORWARD_SLOW")
-
-    def move_normal_forward(self):
-        print("Action: Move Normal Forward")
-        self._send_command("FORWARD")
+        self.set_motor_speeds(0, 0)
 
     def cleanup(self):
         """ Clean up resources (e.g., close serial port) """
