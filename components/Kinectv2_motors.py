@@ -27,17 +27,6 @@ class motors:
             print(f"ERROR: Failed to connect to motors on {serial_port}: {e}")
             print("Motor commands will be simulated.")
             self.motor_enabled = False
-        # ^^^ UNCOMMENT THIS BLOCK ^^^
-        # --------------------------------------------------------------------
-
-        # This part is fine, it handles the simulation case if connection fails
-        if not self.motor_enabled:
-             # This print is expected if the try block fails
-             # print("Motor hardware not connected. Commands will be simulated.")
-             # Keep motor_enabled as False if connection failed
-             pass # No need to set motor_enabled to True here
-
-        print("Motors Initialized.") # Simplified message
 
     def _send_command(self, command):
         """ Helper function to send commands (adapt for your hardware) """
