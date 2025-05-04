@@ -9,29 +9,15 @@ import torch
 
 class YoloQR:
     # <<< REVERT: Default device back to 'cpu' or let caller specify >>>
-    def __init__(self, yolo_model_path='yolov8n.pt', yolo_img_size=640, conf_threshold=0.5, device='cpu',
+    def __init__(self, yolo_model_path='yolov8n.pt', yolo_img_size=640, conf_threshold=0.5,
                  association_radius_px=75):
                 
-        self.device = device # Store requested device
 
         # --- Device Check and YOLO Loading (Reverted) ---
         try:
-            # <<< REVERT: Simple PyTorch Loading >>>
-            print("Loading PyTorch model (.pt).")
-            # Check CUDA availability if requested
-            if 'cuda' in self.device and not torch.cuda.is_available():
-                print(f"WARNING: CUDA device '{self.device}' requested but not available. Falling back to CPU.")
-                self.device = 'cpu' # Fallback internal device variable
-
             # Initialize YOLO object
             self.model = YOLO(yolo_model_path)
             print(f"YOLO object initialized with path: {yolo_model_path}")
-
-            # Move the PyTorch model to the specified device
-            print(f"Moving PyTorch model to device: {self.device}...")
-            self.model.to(self.device)
-            self.use_half = self.device != 'cpu' # Use half precision only on GPU
-            print(f"PyTorch model loaded on {self.device}. Half precision: {self.use_half}")
 
             # --- Common Overrides ---
             self.model.overrides['classes'] = [0] # Detect only 'person'
@@ -83,9 +69,7 @@ class YoloQR:
             results = self.model.predict(
                 frame_bgr_proc_res_cont,
                 imgsz=self.yolo_img_size,
-                verbose=False,
-                half=self.use_half,
-                device=self.device
+                verbose=False
             )
         except Exception as e:
             # ... (error handling remains the same) ...
