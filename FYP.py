@@ -30,9 +30,6 @@ MIN_DEPTH_PROCESSING_MM = 200.0 # 0.2 meters
 SHOW_DEPTH_MAP = True
 SHOW_MASKED_DEPTH_MAP = True # Keep this True as requested
 
-# --- Determine YOLO device ---
-YOLO_DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-
 # --- Shared Data Structures ---
 frame_lock = threading.Lock()
 latest_frames = {
@@ -306,7 +303,6 @@ class ProcessingThread(threading.Thread):
 if __name__ == "__main__":
     print("Initializing System...")
     print(f"Processing Resolution: {PROCESSING_WIDTH}x{PROCESSING_HEIGHT}")
-    print(f"Using YOLO device: {YOLO_DEVICE}")
 
     # Initialize Kinect v2
     try:
