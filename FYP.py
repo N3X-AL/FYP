@@ -8,8 +8,6 @@ from pyzbar import pyzbar # For QR registration and detection
 import torch # For checking CUDA availability
 import traceback # For printing detailed errors
 
-# Import your components (OA is removed)
-# from components.kinectv2_OA import OA # <<< REMOVED OA IMPORT >>>
 from components.kinectv2_yoloqr import YoloQR
 from components.Kinectv2_motors import motors
 
@@ -24,7 +22,7 @@ QR_FOLLOW_TOLERANCE = 75 # Pixels, relative to PROCESSING_WIDTH
 TARGET_STOP_DISTANCE_M = 0.8
 # OBSTACLE_MIN_DISTANCE_M = 0.8 # <<< REMOVED OA CONSTANT >>>
 DEPTH_PROCESSING_LIMIT_MM = 4000.0 # 4 meters
-MIN_DEPTH_PROCESSING_MM = 200.0 # 0.2 meters
+MIN_DEPTH_PROCESSING_MM = 500.0 # 0.2 meters
 
 # --- Visualization Flags ---
 SHOW_DEPTH_MAP = True
@@ -440,7 +438,6 @@ if __name__ == "__main__":
     processing_thread.start()
 
     # --- PID Controller Parameters ---
-    KP_DISTANCE = 0.7  # Proportional gain for distance
     KP_ANGLE = 1      # Proportional gain for angle
     KI = 0.0           # Integral gain (set to 0 if not needed)
     KD = 0.1           # Derivative gain
